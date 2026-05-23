@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+.claude/
+.mcp.json
+CLAUDE.md
+# Added by code-review-graph
+.code-review-graph/
