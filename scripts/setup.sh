@@ -1,5 +1,13 @@
 #!/bin/bash
-# setup.sh — Guided setup for MegaBrain
+# setup.sh — Guided setup for the GitHub-backed MegaBrain (VAULT_SOURCE=github).
+#
+# This wires the GitHub-driver path end to end: a private GitHub vault repo, a
+# local→GitHub auto-push LaunchAgent, a Neon database, a Railway deploy, and a
+# push webhook for instant sync.
+#
+# Running a LOCAL Markdown folder instead? You do NOT need this script — follow
+# the "Quick start (local vault)" section in the README (~3 commands).
+#
 # Run: ./scripts/setup.sh
 #
 # Prerequisites:
@@ -41,6 +49,18 @@ echo ""
 echo -e "${BOLD}🧠 MegaBrain Setup${RESET}"
 echo -e "${DIM}Obsidian Semantic Memory System${RESET}"
 echo ""
+echo -e "${YELLOW}${BOLD}This sets up the GitHub-backed vault driver${RESET} (VAULT_SOURCE=github):"
+echo -e "${DIM}  private GitHub vault repo · local→GitHub auto-push · Neon · Railway · webhook.${RESET}"
+echo ""
+echo -e "  ${BOLD}Just want a local Markdown folder?${RESET} You don't need this script —"
+echo -e "  follow ${BOLD}Quick start (local vault)${RESET} in the README (~3 commands)."
+echo ""
+ask "Continue with the GitHub-backed setup? (y/n):"
+read -r proceed
+if [ "$proceed" != "y" ] && [ "$proceed" != "Y" ]; then
+  echo -e "  ${DIM}Aborted. See the README's local-folder quickstart instead.${RESET}"
+  exit 0
+fi
 
 # ─── Check prerequisites ───────────────────────────────────────
 
@@ -278,6 +298,8 @@ header "Writing .env file"
 cat > "$PROJECT_DIR/.env" << ENV
 NEON_DATABASE_URL=$NEON_DATABASE_URL
 OPENAI_API_KEY=$OPENAI_API_KEY
+# This guided setup wires the GitHub-backed vault driver.
+VAULT_SOURCE=github
 GITHUB_TOKEN=$GITHUB_TOKEN
 GITHUB_REPO=$FULL_REPO
 GITHUB_WEBHOOK_SECRET=$WEBHOOK_SECRET
