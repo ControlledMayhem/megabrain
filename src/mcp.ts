@@ -2,9 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { searchNotes, getNote, listNotes } from "./db.js";
 import { generateQueryEmbedding } from "./embeddings.js";
-import { writeFile, getFileContent, deleteFile } from "./github.js";
+import { getVaultSource } from "./vault/index.js";
 
 export function createMcpServer(): McpServer {
+  const vault = getVaultSource();
   const server = new McpServer({
     name: "megabrain",
     version: "1.0.0",
@@ -99,7 +100,7 @@ export function createMcpServer(): McpServer {
       content: z.string().describe("Markdown content of the note"),
     },
     async ({ path, content }) => {
-      await writeFile(path, content, `Add note: ${path}`);
+      await vault.write(path, content, `Add note: ${path}`);
 
       return {
         content: [
@@ -124,7 +125,7 @@ export function createMcpServer(): McpServer {
     async ({ path, old_text, new_text }) => {
       let content: string;
       try {
-        content = await getFileContent(path);
+        content = await vault.read(path);
       } catch {
         return {
           content: [{ type: "text" as const, text: `Note not found: ${path}` }],
@@ -145,7 +146,7 @@ export function createMcpServer(): McpServer {
       }
 
       const updated = content.replace(old_text, new_text);
-      await writeFile(path, updated, `Update note: ${path}`);
+      await vault.write(path, updated, `Update note: ${path}`);
 
       return {
         content: [
@@ -167,7 +168,7 @@ export function createMcpServer(): McpServer {
     },
     async ({ path }) => {
       try {
-        await deleteFile(path, `Delete note: ${path}`);
+        await vault.delete(path, `Delete note: ${path}`);
       } catch {
         return {
           content: [{ type: "text" as const, text: `Note not found: ${path}` }],

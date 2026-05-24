@@ -2,7 +2,8 @@ import express from "express";
 import crypto from "node:crypto";
 import { config } from "./config.js";
 import { fullSync, incrementalSync } from "./sync.js";
-import { getChangedFiles, getFileContent, writeFile, deleteFile } from "./github.js";
+import { getVaultSource } from "./vault/index.js";
+import { parseGitHubPushPayload } from "./vault/github.js";
 import { searchNotes, getNote, listNotes } from "./db.js";
 import { generateQueryEmbedding } from "./embeddings.js";
 import { createMcpServer } from "./mcp.js";
@@ -25,61 +26,65 @@ function requireApiKey(req: express.Request, res: express.Response, next: expres
 
 export function createServer() {
   const app = express();
+  const vault = getVaultSource();
 
   // --- Health check ---
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "megabrain", timestamp: new Date().toISOString() });
   });
 
-  // --- GitHub webhook ---
-  app.post(
-    "/webhook/github",
-    express.json({ limit: "5mb" }),
-    async (req, res) => {
-      // Verify signature if secret is configured
-      if (config.githubWebhookSecret) {
-        const sig = req.headers["x-hub-signature-256"] as string | undefined;
-        if (!sig) {
-          res.status(401).json({ error: "Missing signature" });
+  // --- GitHub webhook (only when the github driver is active) ---
+  // The local driver has no webhook — it relies on the periodic cron fullSync.
+  if (config.vaultSource === "github") {
+    app.post(
+      "/webhook/github",
+      express.json({ limit: "5mb" }),
+      async (req, res) => {
+        // Verify signature if secret is configured
+        if (config.githubWebhookSecret) {
+          const sig = req.headers["x-hub-signature-256"] as string | undefined;
+          if (!sig) {
+            res.status(401).json({ error: "Missing signature" });
+            return;
+          }
+
+          const expected =
+            "sha256=" +
+            crypto
+              .createHmac("sha256", config.githubWebhookSecret)
+              .update(JSON.stringify(req.body))
+              .digest("hex");
+
+          if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+            res.status(401).json({ error: "Invalid signature" });
+            return;
+          }
+        }
+
+        const event = req.headers["x-github-event"];
+        if (event !== "push") {
+          res.json({ message: `Ignored event: ${event}` });
           return;
         }
 
-        const expected =
-          "sha256=" +
-          crypto
-            .createHmac("sha256", config.githubWebhookSecret)
-            .update(JSON.stringify(req.body))
-            .digest("hex");
+        const { changed, removed } = parseGitHubPushPayload(req.body);
 
-        if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-          res.status(401).json({ error: "Invalid signature" });
+        if (changed.length === 0 && removed.length === 0) {
+          res.json({ message: "No .md files changed" });
           return;
         }
+
+        // Process async — respond immediately
+        res.json({ message: "Processing", changed: changed.length, removed: removed.length });
+
+        try {
+          await incrementalSync(changed, removed);
+        } catch (err) {
+          console.error("[webhook] Sync failed:", err);
+        }
       }
-
-      const event = req.headers["x-github-event"];
-      if (event !== "push") {
-        res.json({ message: `Ignored event: ${event}` });
-        return;
-      }
-
-      const { changed, removed } = getChangedFiles(req.body);
-
-      if (changed.length === 0 && removed.length === 0) {
-        res.json({ message: "No .md files changed" });
-        return;
-      }
-
-      // Process async — respond immediately
-      res.json({ message: "Processing", changed: changed.length, removed: removed.length });
-
-      try {
-        await incrementalSync(changed, removed);
-      } catch (err) {
-        console.error("[webhook] Sync failed:", err);
-      }
-    }
-  );
+    );
+  }
 
   // --- Manual full sync ---
   app.post("/sync", requireApiKey, async (_req, res) => {
@@ -139,7 +144,7 @@ export function createServer() {
     try {
       const { path, content } = req.body;
       if (!path || !content) { res.status(400).json({ error: "path and content are required" }); return; }
-      await writeFile(path, content, `Add note: ${path}`);
+      await vault.write(path, content, `Add note: ${path}`);
       res.json({ message: `Note written: ${path}` });
     } catch (err) {
       res.status(500).json({ error: String(err) });
@@ -152,9 +157,9 @@ export function createServer() {
       if (!path || !old_text || new_text === undefined) {
         res.status(400).json({ error: "path, old_text, and new_text are required" }); return;
       }
-      const raw = await getFileContent(path);
+      const raw = await vault.read(path);
       if (!raw.includes(old_text)) { res.status(400).json({ error: "old_text not found in note" }); return; }
-      await writeFile(path, raw.replace(old_text, new_text), `Update note: ${path}`);
+      await vault.write(path, raw.replace(old_text, new_text), `Update note: ${path}`);
       res.json({ message: `Note updated: ${path}` });
     } catch (err) {
       res.status(500).json({ error: String(err) });
@@ -164,7 +169,7 @@ export function createServer() {
   apiRouter.delete("/notes/*path", async (req, res) => {
     try {
       const notePath = Array.isArray(req.params.path) ? req.params.path.join("/") : req.params.path;
-      await deleteFile(notePath, `Delete note: ${notePath}`);
+      await vault.delete(notePath, `Delete note: ${notePath}`);
       res.json({ message: `Note deleted: ${notePath}` });
     } catch (err) {
       res.status(500).json({ error: String(err) });
