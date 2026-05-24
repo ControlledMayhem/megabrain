@@ -1,10 +1,12 @@
-import { listVaultFiles, getFileContent } from "./github.js";
+import { getVaultSource } from "./vault/index.js";
 import { generateEmbedding } from "./embeddings.js";
 import { upsertNote, deleteNotes, getIndexedPaths } from "./db.js";
 import { parseFrontmatter } from "./frontmatter.js";
 
+const vault = getVaultSource();
+
 /**
- * Full sync: compare GitHub state with DB, process differences.
+ * Full sync: compare vault state with DB, process differences.
  */
 export async function fullSync(): Promise<{
   processed: number;
@@ -14,7 +16,7 @@ export async function fullSync(): Promise<{
   console.log("[sync] Starting full sync...");
 
   const [vaultFiles, indexedRows] = await Promise.all([
-    listVaultFiles(),
+    vault.list(),
     getIndexedPaths(),
   ]);
 
@@ -98,7 +100,7 @@ export async function incrementalSync(
 async function processFile(path: string): Promise<void> {
   console.log(`[sync] Processing: ${path}`);
 
-  const raw = await getFileContent(path);
+  const raw = await vault.read(path);
   const { frontmatter, content } = parseFrontmatter(raw);
 
   const title =
