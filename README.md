@@ -1,5 +1,7 @@
 # MegaBrain — Company Brain
 
+> ⚠️ **Heads-up: the multi-user `company` edition is not fully tested yet.** It works, but it hasn't had thorough testing — especially the per-user auth and write attribution. Run it with that in mind. For the battle-tested single-user setup, use the [`main`](../../tree/main) branch.
+
 Shared semantic memory for your team. Anyone can search, read, and write notes by meaning — and every write is attributed to the person who made it.
 
 ```
